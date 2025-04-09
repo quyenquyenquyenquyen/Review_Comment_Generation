@@ -264,47 +264,50 @@ def main():
         not_loss_dec_cnt, not_bleu_em_inc_cnt = 0, 0 if args.do_eval_bleu else 1e6
 
         for cur_epoch in range(start_epoch, int(args.num_train_epochs)):
-            bar = tqdm(train_dataloader, total=len(train_dataloader), desc="Training")
-            nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
-            model.train()
-            for step, batch in enumerate(bar):
-                batch = tuple(t.to(args.device) for t in batch)
-                source_ids, target_ids = batch
-                source_mask = source_ids.ne(tokenizer.pad_token_id)
-                target_mask = target_ids.ne(tokenizer.pad_token_id)
+    bar = tqdm(train_dataloader, total=len(train_dataloader), desc="Training")
+    nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
+    model.train()
+    try:
+        for step, batch in enumerate(bar):
+            batch = tuple(t.to(args.device) for t in batch)
+            source_ids, target_ids = batch
+            source_mask = source_ids.ne(tokenizer.pad_token_id)
+            target_mask = target_ids.ne(tokenizer.pad_token_id)
 
-                # Thêm log để kiểm tra dữ liệu
-                logger.info(f"Step {step}: source_ids shape: {source_ids.shape}, target_ids shape: {target_ids.shape}")
-                logger.info(f"Step {step}: source_mask shape: {source_mask.shape}, target_mask shape: {target_mask.shape}")
+            if args.model_type == 'roberta':
+                loss, _, _ = model(source_ids=source_ids, source_mask=source_mask,
+                                   target_ids=target_ids, target_mask=target_mask)
+            else:
+                outputs = model(input_ids=source_ids, attention_mask=source_mask,
+                                labels=target_ids, decoder_attention_mask=target_mask)
+                loss = outputs.loss
 
-                if args.model_type == 'roberta':
-                    loss, _, _ = model(source_ids=source_ids, source_mask=source_mask,
-                                       target_ids=target_ids, target_mask=target_mask)
-                else:
-                    outputs = model(input_ids=source_ids, attention_mask=source_mask,
-                                    labels=target_ids, decoder_attention_mask=target_mask)
-                    loss = outputs.loss
+            if args.n_gpu > 1:
+                loss = loss.mean()
+            if args.gradient_accumulation_steps > 1:
+                loss = loss / args.gradient_accumulation_steps
+            tr_loss += loss.item()
 
-                if args.n_gpu > 1:
-                    loss = loss.mean()
-                if args.gradient_accumulation_steps > 1:
-                    loss = loss / args.gradient_accumulation_steps
-                tr_loss += loss.item()
+            nb_tr_examples += source_ids.size(0)
+            nb_tr_steps += 1
+            loss.backward()
 
-                nb_tr_examples += source_ids.size(0)
-                nb_tr_steps += 1
-                loss.backward()
+            if nb_tr_steps % args.gradient_accumulation_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+                scheduler.step()
+                global_step += 1
+                train_loss = round(tr_loss * args.gradient_accumulation_steps / (nb_tr_steps + 1), 4)
+                bar.set_description("[{}] Train loss {}".format(cur_epoch, round(train_loss, 3)))
 
-                if nb_tr_steps % args.gradient_accumulation_steps == 0:
-                    optimizer.step()
-                    optimizer.zero_grad()
-                    scheduler.step()
-                    global_step += 1
-                    train_loss = round(tr_loss * args.gradient_accumulation_steps / (nb_tr_steps + 1), 4)
-                    bar.set_description("[{}] Train loss {}".format(cur_epoch, round(train_loss, 3)))
+        save_checkpoint(model, optimizer, scheduler, cur_epoch + 1, tr_loss / nb_tr_steps, args)
 
-            # Lưu checkpoint vào /kaggle/output/
-            save_checkpoint(model, optimizer, scheduler, cur_epoch + 1, tr_loss / nb_tr_steps, args)
+    except KeyboardInterrupt:
+        logger.info("Đã nhận KeyboardInterrupt. Lưu checkpoint và thoát...")
+        save_checkpoint(model, optimizer, scheduler, cur_epoch + 1, tr_loss / nb_tr_steps, args)
+        logger.info("Checkpoint đã được lưu. Thoát chương trình.")
+        torch.cuda.empty_cache()
+        break
 
             if args.do_eval:
                 if 'dev_loss' in dev_dataset:
