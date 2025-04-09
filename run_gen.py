@@ -66,16 +66,28 @@ def save_checkpoint(model, optimizer, scheduler, epoch, loss, args):
     torch.save(checkpoint, filepath)
     logger.info(f'Saved checkpoint at epoch {epoch} to {filepath}')
 
-# Hàm load checkpoint gần nhất
+# Hàm load checkpoint gần nhất (đã điều chỉnh)
 def load_latest_checkpoint(model, optimizer, scheduler, args):
-    checkpoint_dir = os.path.join("/kaggle/output/", os.path.basename(args.output_dir), 'checkpoints')
-    if not os.path.exists(checkpoint_dir):
-        return model, optimizer, scheduler, args.start_epoch, None
-    
+    # Đường dẫn mặc định trong /kaggle/output/ khi chạy notebook hiện tại
+    output_checkpoint_dir = os.path.join("/kaggle/output/", os.path.basename(args.output_dir), 'checkpoints')
+    # Đường dẫn thay thế trong /kaggle/input/ khi dùng đầu ra từ phiên bản cũ
+    input_checkpoint_dir = os.path.join("/kaggle/input/", os.path.basename(args.output_dir), 'checkpoints')
+
+    # Ưu tiên tìm trong /kaggle/output/ trước
+    checkpoint_dir = output_checkpoint_dir
     checkpoint_files = glob.glob(os.path.join(checkpoint_dir, 'checkpoint_epoch_*.pt'))
+    
+    # Nếu không tìm thấy trong /kaggle/output/, thử tìm trong /kaggle/input/
+    if not checkpoint_files and os.path.exists(input_checkpoint_dir):
+        checkpoint_dir = input_checkpoint_dir
+        checkpoint_files = glob.glob(os.path.join(checkpoint_dir, 'checkpoint_epoch_*.pt'))
+    
+    # Nếu không tìm thấy checkpoint ở cả hai nơi
     if not checkpoint_files:
+        logger.info("Không tìm thấy checkpoint nào trong /kaggle/output/ hoặc /kaggle/input/.")
         return model, optimizer, scheduler, args.start_epoch, None
     
+    # Lấy checkpoint mới nhất
     latest_checkpoint = max(checkpoint_files, key=os.path.getctime)
     checkpoint = torch.load(latest_checkpoint, weights_only=False)
     
@@ -248,7 +260,7 @@ def main():
                                                     num_warmup_steps=args.warmup_steps,
                                                     num_training_steps=num_train_optimization_steps)
 
-        # Load checkpoint từ /kaggle/output/
+        # Load checkpoint từ /kaggle/output/ hoặc /kaggle/input/
         model, optimizer, scheduler, start_epoch, _ = load_latest_checkpoint(model, optimizer, scheduler, args)
 
         train_example_num = len(train_data)
