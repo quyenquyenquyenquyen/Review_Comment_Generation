@@ -13,11 +13,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""
-Fine-tuning the library models for language modeling on a text file (GPT, GPT-2, BERT, RoBERTa).
-GPT and GPT-2 are fine-tuned using a causal language modeling (CLM) loss while BERT and RoBERTa are fine-tuned
-using a masked language modeling (MLM) loss.
-"""
 
 import os
 import logging
@@ -48,9 +43,9 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Hàm lưu checkpoint
+# Hàm lưu checkpoint (sử dụng /kaggle/working/)
 def save_checkpoint(model, optimizer, scheduler, epoch, loss, args):
-    checkpoint_dir = os.path.join("/kaggle/output/", os.path.basename(args.output_dir), 'checkpoints')
+    checkpoint_dir = os.path.join("/kaggle/working/", os.path.basename(args.output_dir), 'checkpoints')
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
     
@@ -66,38 +61,39 @@ def save_checkpoint(model, optimizer, scheduler, epoch, loss, args):
     torch.save(checkpoint, filepath)
     logger.info(f'Saved checkpoint at epoch {epoch} to {filepath}')
 
-# Hàm load checkpoint gần nhất (đã điều chỉnh)
+# Hàm tải checkpoint gần nhất (tìm trong /kaggle/input/ hoặc /kaggle/working/)
 def load_latest_checkpoint(model, optimizer, scheduler, args):
-    # Đường dẫn mặc định trong /kaggle/output/ khi chạy notebook hiện tại
-    output_checkpoint_dir = os.path.join("/kaggle/output/", os.path.basename(args.output_dir), 'checkpoints')
-    # Đường dẫn thay thế trong /kaggle/input/ khi dùng đầu ra từ phiên bản cũ
-    input_checkpoint_dir = os.path.join("/kaggle/input/", os.path.basename(args.output_dir), 'checkpoints')
-
-    # Ưu tiên tìm trong /kaggle/output/ trước
-    checkpoint_dir = output_checkpoint_dir
+    # Đường dẫn trong /kaggle/working/ (cho phiên hiện tại)
+    working_checkpoint_dir = os.path.join("/kaggle/working/", os.path.basename(args.output_dir), 'checkpoints')
+    # Đường dẫn trong /kaggle/input/ (cho dataset từ phiên bản trước)
+    # Giả sử bạn đã tạo dataset với tên 'my-model-checkpoints'
+    input_checkpoint_dir = "/kaggle/input/my-model-checkpoints/checkpoints"  # Thay 'my-model-checkpoints' bằng tên dataset thực tế
+    
+    # Ưu tiên tìm trong /kaggle/working/ trước (nếu đang tiếp tục trong cùng phiên)
+    checkpoint_dir = working_checkpoint_dir
     checkpoint_files = glob.glob(os.path.join(checkpoint_dir, 'checkpoint_epoch_*.pt'))
     
-    # Nếu không tìm thấy trong /kaggle/output/, thử tìm trong /kaggle/input/
+    # Nếu không tìm thấy trong /kaggle/working/, thử tìm trong /kaggle/input/
     if not checkpoint_files and os.path.exists(input_checkpoint_dir):
         checkpoint_dir = input_checkpoint_dir
         checkpoint_files = glob.glob(os.path.join(checkpoint_dir, 'checkpoint_epoch_*.pt'))
     
     # Nếu không tìm thấy checkpoint ở cả hai nơi
     if not checkpoint_files:
-        logger.info("Không tìm thấy checkpoint nào trong /kaggle/output/ hoặc /kaggle/input/.")
+        logger.info("Không tìm thấy checkpoint nào trong /kaggle/working/ hoặc /kaggle/input/. Bắt đầu từ đầu.")
         return model, optimizer, scheduler, args.start_epoch, None
     
     # Lấy checkpoint mới nhất
     latest_checkpoint = max(checkpoint_files, key=os.path.getctime)
-    checkpoint = torch.load(latest_checkpoint, weights_only=False)
+    checkpoint = torch.load(latest_checkpoint, map_location=args.device, weights_only=False)
     
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-    start_epoch = checkpoint['epoch']
+    start_epoch = checkpoint['epoch'] + 1  # Tiếp tục từ epoch tiếp theo
     loss = checkpoint['loss']
     
-    logger.info(f"Loaded checkpoint from {latest_checkpoint} at epoch {start_epoch}")
+    logger.info(f"Loaded checkpoint from {latest_checkpoint} at epoch {start_epoch - 1}")
     return model, optimizer, scheduler, start_epoch, loss
 
 def eval_ppl_epoch(args, eval_data, eval_examples, model, tokenizer):
@@ -124,7 +120,6 @@ def eval_ppl_epoch(args, eval_data, eval_examples, model, tokenizer):
                 outputs = model(input_ids=source_ids, attention_mask=source_mask,
                                 labels=target_ids, decoder_attention_mask=target_mask)
                 loss = outputs.loss
-        print('loss', loss)
         
         if args.n_gpu > 1:
             loss = loss.mean()
@@ -157,22 +152,20 @@ def eval_bleu_epoch(args, eval_data, eval_examples, model, tokenizer, split_tag,
                 preds = model(source_ids=source_ids, source_mask=source_mask)
                 top_preds = [pred[0].cpu().numpy() for pred in preds]
             else:
-                preds = model.generate(source_ids,
-                                       attention_mask=source_mask,
-                                       use_cache=True,
-                                       num_beams=args.beam_size,
-                                       early_stopping=args.task == 'summarize',
-                                       max_length=args.max_target_length,
-                                       num_return_sequences=args.beam_size)
-                print('predictions:', len(list(preds.cpu().numpy())))
+                preds = model.generate(
+                    input_ids=source_ids,  # Đã sửa từ source_ids thành input_ids
+                    attention_mask=source_mask,
+                    use_cache=True,
+                    num_beams=args.beam_size,
+                    early_stopping=args.task == 'summarize',
+                    max_length=args.max_target_length,
+                    num_return_sequences=args.beam_size
+                )
                 top_preds = list(preds.cpu().numpy())
             pred_ids.extend(top_preds)
 
     pred_nls = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in pred_ids]
-    print('predictions:', len(pred_nls))
-    print(int(len(pred_nls)/args.beam_size))
     pred_nls_new = ['\t'.join(pred_nls[i*args.beam_size: (i+1)*args.beam_size]) for i in range(int(len(pred_nls)/args.beam_size))]
-    print('predictions after merge:', len(pred_nls_new))
     pred_nls = pred_nls_new
 
     output_fn = os.path.join(args.res_dir, "test_{}.output".format(criteria))
@@ -260,7 +253,7 @@ def main():
                                                     num_warmup_steps=args.warmup_steps,
                                                     num_training_steps=num_train_optimization_steps)
 
-        # Load checkpoint từ /kaggle/output/ hoặc /kaggle/input/
+        # Load checkpoint từ /kaggle/working/ hoặc /kaggle/input/
         model, optimizer, scheduler, start_epoch, _ = load_latest_checkpoint(model, optimizer, scheduler, args)
 
         train_example_num = len(train_data)
@@ -312,6 +305,7 @@ def main():
                         train_loss = round(tr_loss * args.gradient_accumulation_steps / (nb_tr_steps + 1), 4)
                         bar.set_description("[{}] Train loss {}".format(cur_epoch, round(train_loss, 3)))
 
+                # Lưu checkpoint sau mỗi epoch
                 save_checkpoint(model, optimizer, scheduler, cur_epoch + 1, tr_loss / nb_tr_steps, args)
 
             except KeyboardInterrupt:
