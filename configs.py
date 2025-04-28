@@ -16,7 +16,7 @@ def add_args(parser):
     parser.add_argument("--model_type", default="codet5", type=str, choices=['roberta', 'bart', 'codet5','t5'])
     parser.add_argument("--add_lang_ids", action='store_true')
     parser.add_argument("--data_num", default=-1, type=int)
-    parser.add_argument("--start_epoch", default=0, type=int, help="Epoch để resume từ checkpoint")
+    parser.add_argument("--start_epoch", default=0, type=int)
     parser.add_argument("--num_train_epochs", default=100, type=int)
     parser.add_argument("--patience", default=5, type=int)
     parser.add_argument("--cache_path", type=str, required=True)
