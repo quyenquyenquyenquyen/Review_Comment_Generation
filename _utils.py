@@ -195,7 +195,7 @@ def read_refine_examples(filename, data_num):
     trg_filename = filename.split(',')[1]
     idx = 0
 
-    with open(src_filename, encoding="utf-8", errors="replace") as f1, open(trg_filename, encoding="utf-8", errors="replace") as f2:
+    with open(src_filename) as f1, open(trg_filename) as f2:
         for line1, line2 in zip(f1, f2):
             examples.append(
                 Example(
