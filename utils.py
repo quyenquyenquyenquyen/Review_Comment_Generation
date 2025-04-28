@@ -28,8 +28,7 @@ def load_and_cache_gen_data(args, filename, pool, tokenizer, split_tag, only_src
         calc_stats(examples)
     if os.path.exists(cache_fn) and not is_sample:
         logger.info("Load cache data from %s", cache_fn)
-        data = torch.load(cache_fn, weights_only=False)
-
+        data = torch.load(cache_fn)
     else:
         if is_sample:
             logger.info("Sample 5k data for computing bleu from %s", filename)
