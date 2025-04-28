@@ -218,25 +218,6 @@ def main():
                                                     num_training_steps=num_train_optimization_steps)
         print("args.warmup_steps",args.warmup_steps)
         print("num_train_optimization_steps:", num_train_optimization_steps)
-        # Khởi tạo counters
-        global_step = 0
-        best_bleu_em = -1
-        best_ppl = 1e6
-        # Resume nếu đã có checkpoint trước đó
-        ckpt_paths = glob.glob(os.path.join(args.output_dir, 'checkpoint-epoch-*', 'checkpoint.pt'))
-        if ckpt_paths:
-            latest_ckpt = max(ckpt_paths, key=os.path.getctime)
-            logger.info(f"Resume from {latest_ckpt}")
-            ckpt = torch.load(latest_ckpt, map_location=args.device)
-            model_to_load = model.module if hasattr(model, 'module') else model
-            model_to_load.load_state_dict(ckpt['model_state_dict'])
-            optimizer.load_state_dict(ckpt['optimizer_state_dict'])
-            scheduler.load_state_dict(ckpt['scheduler_state_dict'])
-            global_step = ckpt.get('global_step', 0)
-            # tiếp tục từ epoch tiếp theo
-            args.start_epoch = ckpt.get('epoch', 0) + 1
-        else:
-            args.start_epoch = 0
         # Start training
         train_example_num = len(train_data)
         logger.info("***** Running training *****")
@@ -413,18 +394,6 @@ def main():
                             fa.write(stop_early_str)
                             break
             logger.info("***** CUDA.empty_cache() *****")
-            # Sau eval / early-stop logic, trước torch.cuda.empty_cache()
-            checkpoint_dir = os.path.join(args.output_dir, f'checkpoint-epoch-{cur_epoch}')
-            os.makedirs(checkpoint_dir, exist_ok=True)
-            model_to_save = model.module if hasattr(model, 'module') else model
-            torch.save({
-                'epoch': cur_epoch,
-                'model_state_dict': model_to_save.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'global_step': global_step
-            }, os.path.join(checkpoint_dir, 'checkpoint.pt'))
-            logger.info(f"Saved checkpoint for epoch {cur_epoch} -> {checkpoint_dir}")
             torch.cuda.empty_cache()
 
         if args.local_rank in [-1, 0] and args.data_num == -1:
