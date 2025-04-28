@@ -1,9 +1,9 @@
- mkdir model
- mkdir ./model/code2review_trans_data_task2/
- mkdir ./model/code2review_trans_data_task2/cache/
- mkdir ./model/code2review_trans_data_task2/outputs/
- mkdir ./model/code2review_trans_data_task2/summary/
- mkdir ./model/code2review_trans_data_task2/outputs/results
+ mkdir -p model
+ mkdir -p ./model/code2review_trans_data_task2/
+ mkdir -p ./model/code2review_trans_data_task2/cache/
+ mkdir -p ./model/code2review_trans_data_task2/outputs/
+ mkdir -p ./model/code2review_trans_data_task2/summary/
+ mkdir -p ./model/code2review_trans_data_task2/outputs/results
 
 CUDA_VISIBLE_DEVICES=0 python  run_gen.py  --do_train --do_eval --do_eval_bleu  \
         --task refine --sub_task small --model_type codet5 --data_num -1    \
