@@ -264,7 +264,8 @@ def main():
 
         logger.info("args.warmup_steps %s", args.warmup_steps)
         logger.info("num_train_optimization_steps: %s", num_train_optimization_steps)
-
+        print("args.warmup_steps",args.warmup_steps) # <-- Lệnh print từ file 1
+        print("num_train_optimization_steps:", num_train_optimization_steps) # <-- Lệnh print từ file 1
         global_step = 0
         best_bleu_em = -1
         best_ppl = float('inf')
@@ -292,7 +293,7 @@ def main():
         logger.info("  Batch num = %d", math.ceil(train_example_num / args.train_batch_size))
         logger.info("  Num epoch = %d", args.num_train_epochs)
         logger.info("Model type: %s", args.model_type)
-
+        print( args.model_type) # <-- Lệnh print từ file 1
         dev_dataset = {}
         not_loss_dec_cnt = 0
         not_bleu_em_inc_cnt = 0 if args.do_eval_bleu else int(1e6)
@@ -357,6 +358,7 @@ def main():
                 logger.info("  eval_ppl = %s", eval_ppl)
                 if args.data_num == -1:
                     tb_writer.add_scalar('dev_ppl', eval_ppl, cur_epoch)
+                print("eval_ppl:",eval_ppl) # <-- Lệnh print từ file 1
 
                 if eval_ppl < best_ppl:
                     not_loss_dec_cnt = 0
