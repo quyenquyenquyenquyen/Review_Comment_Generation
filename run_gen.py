@@ -394,6 +394,10 @@ def main():
                     )
                     if args.data_num == -1:
                         tb_writer.add_scalar('dev_bleu_em', dev_bleu_em, cur_epoch)
+                    print("dev_bleu:",dev_bleu)
+                    print("dev_em:", dev_em)
+                    print("dev_bleu_em:",dev_bleu_em)
+                    print("best_bleu_em:", best_bleu_em)
 
                     if dev_bleu_em > best_bleu_em:
                         not_bleu_em_inc_cnt = 0
