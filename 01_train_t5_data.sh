@@ -14,7 +14,7 @@ mkdir -p ./model/code2review_t5_data_task2/outputs/results
 
 # Copy checkpoint cũ vào đúng vị trí
 mkdir -p ${OUT}/checkpoint-epoch-2
-cp ${CKPT_SRC}/checkpoint.pt ${OUT}/checkpoint-epoch-1/
+cp ${CKPT_SRC}/checkpoint.pt ${OUT}/checkpoint-epoch-2/
 
 # Chạy script huấn luyện
 CUDA_VISIBLE_DEVICES=0 python run_gen.py \
