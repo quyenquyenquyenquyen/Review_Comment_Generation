@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Đường dẫn nguyên gốc checkpoint trên Kaggle
-CKPT_SRC=/kaggle/input/checkpoint-0/checkpoint-epoch-0
+CKPT_SRC=/kaggle/input/checkpoint-1/checkpoint-epoch-1
 
 # Thư mục output của bạn (writable)
 OUT=./model/code2review_t5_data_task2/outputs
@@ -13,8 +13,8 @@ mkdir -p ./model/code2review_t5_data_task2/summary/
 mkdir -p ./model/code2review_t5_data_task2/outputs/results
 
 # Copy checkpoint cũ vào đúng vị trí
-mkdir -p ${OUT}/checkpoint-epoch-0
-cp ${CKPT_SRC}/checkpoint.pt ${OUT}/checkpoint-epoch-0/
+mkdir -p ${OUT}/checkpoint-epoch-1
+cp ${CKPT_SRC}/checkpoint.pt ${OUT}/checkpoint-epoch-1/
 
 # Chạy script huấn luyện
 CUDA_VISIBLE_DEVICES=0 python run_gen.py \
