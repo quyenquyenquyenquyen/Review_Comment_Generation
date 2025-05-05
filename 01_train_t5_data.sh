@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Đường dẫn nguyên gốc checkpoint trên Kaggle
-CKPT_SRC=/kaggle/input/checkpoint-5/checkpoint-epoch-5
+CKPT_SRC=/kaggle/input/checkpoint-9/checkpoint-epoch-9
 
 # Thư mục output của bạn (writable)
 OUT=./model/code2review_t5_data_task2/outputs
@@ -13,14 +13,14 @@ mkdir -p ./model/code2review_t5_data_task2/summary/
 mkdir -p ./model/code2review_t5_data_task2/outputs/results
 
 # Copy checkpoint cũ vào đúng vị trí
-mkdir -p ${OUT}/checkpoint-epoch-5
-cp ${CKPT_SRC}/checkpoint.pt ${OUT}/checkpoint-epoch-5/
+mkdir -p ${OUT}/checkpoint-epoch-9
+cp ${CKPT_SRC}/checkpoint.pt ${OUT}/checkpoint-epoch-9/
 
 # Chạy script huấn luyện
 CUDA_VISIBLE_DEVICES=0 python run_gen.py \
     --do_train --do_eval --do_eval_bleu \
     --task refine --sub_task small --model_type codet5 \
-    --data_num -1 --num_train_epochs 6 --warmup_steps 500 \
+    --data_num -1 --num_train_epochs 10 --warmup_steps 500 \
     --learning_rate 5e-5 --patience 3 --beam_size 5 \
     --gradient_accumulation_steps 1 \
     --tokenizer_name=Salesforce/codet5-base \
