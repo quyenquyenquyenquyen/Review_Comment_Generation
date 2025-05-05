@@ -26,7 +26,7 @@ CUDA_VISIBLE_DEVICES=0 python  run_gen2.py  --do_test --do_eval_bleu  \
         --gradient_accumulation_steps 1 \
         --tokenizer_name=Salesforce/codet5-base  \
         --model_name_or_path=Salesforce/codet5-base \
-        --data_dir  "/kaggle/input/daataa1/task2_data/t5_data/codet5_format_data" \
+        --data_dir  "/kaggle/input/daataa5/task2_data/t5_data/codet5_format_data" \
         --cache_path ./model/code2review_t5_data_task2/cache/  \
         --output_dir ./model/code2review_t5_data_task2/outputs/  \
         --summary_dir ./model/code2review_t5_data_task2/summary/   --save_last_checkpoints --always_save_model \
