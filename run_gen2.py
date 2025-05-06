@@ -368,55 +368,54 @@ def main():
         if args.local_rank in [-1, 0] and args.data_num == -1:
             tb_writer.close()
         logger.info("Finish training and take %s", get_elapse_time(t0))
-
-        if args.do_test:
-                logger.info("***** Testing *****")
-                logger.info("Batch size = %d", args.eval_batch_size)
+    if args.do_test:
+        logger.info("***** Testing *****")
+        logger.info("Batch size = %d", args.eval_batch_size)
         
-                for criteria in ['best-bleu']:
-                    # Load checkpoint
-                    file = "/kaggle/input/checkpoint-best-bleu/pytorch_model.bin"
-                    model.load_state_dict(torch.load(file))
+        for criteria in ['best-bleu']:
+            # Load checkpoint
+            file = "/kaggle/input/checkpoint-best-bleu/pytorch_model.bin"
+            model.load_state_dict(torch.load(file))
         
-                    # Prepare test data
-                    eval_examples, eval_data = load_and_cache_gen_data(
-                        args, args.test_filename, pool, tokenizer,
-                        'test', only_src=True, is_sample=False
-                    )
+            # Prepare test data
+            eval_examples, eval_data = load_and_cache_gen_data(
+                args, args.test_filename, pool, tokenizer,
+                'test', only_src=True, is_sample=False
+            )
+      
+            # Compute BLEU/EM/CodeBLEU
+            result = eval_bleu_epoch(
+                args, eval_data, eval_examples,
+                model, tokenizer, 'test', criteria
+            )
+            # Compute PPL
+            eval_ppl = eval_ppl_epoch(
+                args, eval_data, eval_examples,
+                model, tokenizer
+            )
+      
+            # Print all metrics
+            print(f"=== Test metrics ({criteria}) ===")
+            print(f"  Perplexity (PPL): {eval_ppl:.5f}")
+            print(f"  BLEU‑4          : {result['bleu']:.2f}")
+            print(f"  Exact Match (EM): {result['em']:.2f}%")
+            print(f"  CodeBLEU        : {result.get('codebleu', 0):.2f}")
+      
+            # Log / write to file as before
+            result_str = "[%s] bleu-4: %.2f, em: %.4f, codebleu: %.4f\n" % (
+                criteria, result['bleu'], result['em'], result.get('codebleu', 0)
+            )
+            logger.info(result_str)
+            fa.write(result_str)
         
-                    # Compute BLEU/EM/CodeBLEU
-                    result = eval_bleu_epoch(
-                        args, eval_data, eval_examples,
-                        model, tokenizer, 'test', criteria
-                    )
-                    # Compute PPL
-                    eval_ppl = eval_ppl_epoch(
-                        args, eval_data, eval_examples,
-                        model, tokenizer
-                    )
-        
-                    # Print all metrics
-                    print(f"=== Test metrics ({criteria}) ===")
-                    print(f"  Perplexity (PPL): {eval_ppl:.5f}")
-                    print(f"  BLEU‑4          : {result['bleu']:.2f}")
-                    print(f"  Exact Match (EM): {result['em']:.2f}%")
-                    print(f"  CodeBLEU        : {result.get('codebleu', 0):.2f}")
-        
-                    # Log / write to file as before
-                    result_str = "[%s] bleu-4: %.2f, em: %.4f, codebleu: %.4f\n" % (
-                        criteria, result['bleu'], result['em'], result.get('codebleu', 0)
-                    )
-                    logger.info(result_str)
-                    fa.write(result_str)
-        
-                    if args.res_fn:
-                        with open(args.res_fn, 'a+') as f:
-                            f.write(f"[Time: {get_elapse_time(t0)}] {file}\n")
-                            f.write(result_str)
-        
-                logger.info("Finish and take %s", get_elapse_time(t0))
-                fa.write("Finish and take %s" % get_elapse_time(t0))
-                fa.close()
+            if args.res_fn:
+                with open(args.res_fn, 'a+') as f:
+                    f.write(f"[Time: {get_elapse_time(t0)}] {file}\n")
+                    f.write(result_str)
+      
+        logger.info("Finish and take %s", get_elapse_time(t0))
+        fa.write("Finish and take %s" % get_elapse_time(t0))
+        fa.close()
 
 
 
