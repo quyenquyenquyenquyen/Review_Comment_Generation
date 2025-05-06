@@ -43,46 +43,6 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-def eval_ppl_epoch(args, eval_data, eval_examples, model, tokenizer):
-    eval_sampler = SequentialSampler(eval_data)
-    eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size,
-                                 num_workers=4, pin_memory=True)
-    # Start evaluating model
-    logger.info("  " + "***** Running ppl evaluation *****")
-    logger.info("  Num examples = %d", len(eval_examples))
-    logger.info("  Batch size = %d", args.eval_batch_size)
-
-    model.eval()
-    eval_loss, batch_num = 0, 0
-    for batch in tqdm(eval_dataloader, total=len(eval_dataloader), desc="Eval ppl"):
-        batch = tuple(t.to(args.device) for t in batch)
-        source_ids, target_ids = batch
-        source_mask = source_ids.ne(tokenizer.pad_token_id)
-        target_mask = target_ids.ne(tokenizer.pad_token_id)
-
-        with torch.no_grad():
-            if args.model_type == 'roberta':
-                loss, _, _ = model(source_ids=source_ids, source_mask=source_mask,
-                                   target_ids=target_ids, target_mask=target_mask)
-            else:
-                outputs = model(input_ids=source_ids, attention_mask=source_mask,
-                                labels=target_ids, decoder_attention_mask=target_mask)
-                loss = outputs.loss
-        print('loss',loss)
-        
-        if args.n_gpu > 1:
-            loss = loss.mean()  # mean() to average on multi-gpu.
-        #if args.gradient_accumulation_steps > 1:
-            #loss = loss / args.gradient_accumulation_steps
-        eval_loss += loss.item()
-
-        batch_num += 1
-    eval_loss = eval_loss / batch_num
-    eval_ppl = round(np.exp(eval_loss), 5)
-    return eval_ppl
-
-
 def eval_bleu_epoch(args, eval_data, eval_examples, model, tokenizer, split_tag, criteria):
     logger.info("  ***** Running bleu evaluation on {} data*****".format(split_tag))
     logger.info("  Num examples = %d", len(eval_examples))
@@ -388,15 +348,10 @@ def main():
                 args, eval_data, eval_examples,
                 model, tokenizer, 'test', criteria
             )
-            # Compute PPL
-            eval_ppl = eval_ppl_epoch(
-                args, eval_data, eval_examples,
-                model, tokenizer
-            )
+            
       
             # Print all metrics
             print(f"=== Test metrics ({criteria}) ===")
-            print(f"  Perplexity (PPL): {eval_ppl:.5f}")
             print(f"  BLEU‑4          : {result['bleu']:.2f}")
             print(f"  Exact Match (EM): {result['em']:.2f}%")
             print(f"  CodeBLEU        : {result.get('codebleu', 0):.2f}")
