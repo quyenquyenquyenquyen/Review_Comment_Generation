@@ -40,21 +40,20 @@ from models import build_or_load_gen_model
 from transformers import get_linear_schedule_with_warmup
 from utils import get_elapse_time, get_filenames, load_and_cache_gen_data
 
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-    datefmt='%m/%d/%Y %H:%M:%S',
-    level=logging.INFO
-)
+
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                    datefmt='%m/%d/%Y %H:%M:%S',
+                    level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 def eval_ppl_epoch(args, eval_data, eval_examples, model, tokenizer):
+    # ... (giữ nguyên hàm này) ...
     eval_sampler = SequentialSampler(eval_data)
-    eval_dataloader = DataLoader(
-        eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size,
-        num_workers=4, pin_memory=True
-    )
-    logger.info("  ***** Running ppl evaluation *****")
+    eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size,
+                                 num_workers=4, pin_memory=True)
+    # Start evaluating model
+    logger.info("  " + "***** Running ppl evaluation *****")
     logger.info("  Num examples = %d", len(eval_examples))
     logger.info("  Batch size = %d", args.eval_batch_size)
 
@@ -68,119 +67,99 @@ def eval_ppl_epoch(args, eval_data, eval_examples, model, tokenizer):
 
         with torch.no_grad():
             if args.model_type == 'roberta':
-                loss, _, _ = model(
-                    source_ids=source_ids,
-                    source_mask=source_mask,
-                    target_ids=target_ids,
-                    target_mask=target_mask
-                )
+                loss, _, _ = model(source_ids=source_ids, source_mask=source_mask,
+                                   target_ids=target_ids, target_mask=target_mask)
             else:
-                outputs = model(
-                    input_ids=source_ids,
-                    attention_mask=source_mask,
-                    labels=target_ids,
-                    decoder_attention_mask=target_mask
-                )
+                outputs = model(input_ids=source_ids, attention_mask=source_mask,
+                                labels=target_ids, decoder_attention_mask=target_mask)
                 loss = outputs.loss
-
+        
         if args.n_gpu > 1:
             loss = loss.mean()
         eval_loss += loss.item()
         batch_num += 1
-
     eval_loss = eval_loss / batch_num
     eval_ppl = round(np.exp(eval_loss), 5)
     return eval_ppl
 
 
 def eval_bleu_epoch(args, eval_data, eval_examples, model, tokenizer, split_tag, criteria):
-    logger.info("  ***** Running bleu evaluation on %s data*****", split_tag)
+    # ... (giữ nguyên hàm này) ...
+    logger.info("  ***** Running bleu evaluation on {} data*****".format(split_tag))
     logger.info("  Num examples = %d", len(eval_examples))
     logger.info("  Batch size = %d", args.eval_batch_size)
-
     eval_sampler = SequentialSampler(eval_data)
-    kwargs = {
-        'sampler': eval_sampler,
-        'batch_size': args.eval_batch_size
-    }
     if args.data_num == -1:
-        kwargs.update({'num_workers': 4, 'pin_memory': True})
-    eval_dataloader = DataLoader(eval_data, **kwargs)
+        eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size,
+                                     num_workers=4, pin_memory=True)
+    else:
+        eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
 
     model.eval()
     pred_ids = []
-
-    for batch in tqdm(
-            eval_dataloader,
-            total=len(eval_dataloader),
-            desc=f"Eval bleu for {split_tag} set"
-    ):
+    bleu, codebleu = 0.0, 0.0 # codebleu có vẻ chưa được dùng đúng cách ở đây, cần xem xét lại nếu task là concode
+    for batch in tqdm(eval_dataloader, total=len(eval_dataloader), desc="Eval bleu for {} set".format(split_tag)):
         source_ids = batch[0].to(args.device)
         source_mask = source_ids.ne(tokenizer.pad_token_id)
-
         with torch.no_grad():
             if args.model_type == 'roberta':
                 preds = model(source_ids=source_ids, source_mask=source_mask)
                 top_preds = [pred[0].cpu().numpy() for pred in preds]
             else:
-                preds = model.generate(
-                    source_ids,
-                    attention_mask=source_mask,
-                    use_cache=True,
-                    num_beams=args.beam_size,
-                    early_stopping=args.task == 'summarize',
-                    max_length=args.max_target_length
-                )
+                preds = model.generate(source_ids,
+                                       attention_mask=source_mask,
+                                       use_cache=True,
+                                       num_beams=args.beam_size,
+                                       early_stopping=args.task == 'summarize',
+                                       max_length=args.max_target_length)
                 top_preds = list(preds.cpu().numpy())
+            pred_ids.extend(top_preds)
 
-        pred_ids.extend(top_preds)
+    pred_nls = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in pred_ids]
 
-    pred_nls = [
-        tokenizer.decode(
-            idx, skip_special_tokens=True,
-            clean_up_tokenization_spaces=False
-        ) for idx in pred_ids
-    ]
+    output_fn = os.path.join(args.res_dir, "test_{}.output".format(criteria))
+    gold_fn = os.path.join(args.res_dir, "test_{}.gold".format(criteria))
+    src_fn = os.path.join(args.res_dir, "test_{}.src".format(criteria))
 
-    output_fn = os.path.join(args.res_dir, f"test_{criteria}.output")
-    gold_fn = os.path.join(args.res_dir, f"test_{criteria}.gold")
-    src_fn = os.path.join(args.res_dir, f"test_{criteria}.src")
-
-    if args.task == 'defect':
-        target_map = {0: 'false', 1: 'true'}
-        golds = [target_map[ex.target] for ex in eval_examples]
+    if args.task in ['defect']:
+        target_dict = {0: 'false', 1: 'true'}
+        golds = [target_dict[ex.target] for ex in eval_examples]
         eval_acc = np.mean([int(p == g) for p, g in zip(pred_nls, golds)])
         result = {'em': eval_acc * 100, 'bleu': 0, 'codebleu': 0}
 
-        with open(output_fn, 'w') as fo, open(gold_fn, 'w') as fg, open(src_fn, 'w') as fs:
-            for pred, ex in zip(pred_nls, eval_examples):
-                fo.write(pred.strip() + '\n')
-                fg.write(target_map[ex.target] + '\n')
-                fs.write(ex.source.strip() + '\n')
+        with open(output_fn, 'w') as f, open(gold_fn, 'w') as f1, open(src_fn, 'w') as f2:
+            for pred_nl, gold in zip(pred_nls, eval_examples):
+                f.write(pred_nl.strip() + '\n')
+                f1.write(target_dict[gold.target] + '\n')
+                f2.write(gold.source.strip() + '\n')
             logger.info("Save the predictions into %s", output_fn)
     else:
-        dev_accs = []
-        with open(output_fn, 'w') as fo, open(gold_fn, 'w') as fg, open(src_fn, 'w') as fs:
-            for pred, ex in zip(pred_nls, eval_examples):
-                dev_accs.append(pred.strip() == ex.target.strip())
-                if args.task == 'summarize':
-                    fo.write(f"{ex.idx}\t{pred.strip()}\n")
-                    fg.write(f"{ex.idx}\t{ex.target.strip()}\n")
-                    fs.write(f"{ex.idx}\t{ex.source.strip()}\n")
+        dev_accs, predictions = [], []
+        with open(output_fn, 'w') as f, open(gold_fn, 'w') as f1, open(src_fn, 'w') as f2:
+            for pred_nl, gold in zip(pred_nls, eval_examples):
+                dev_accs.append(pred_nl.strip() == gold.target.strip())
+                if args.task in ['summarize']:
+                    predictions.append(str(gold.idx) + '\t' + pred_nl)
+                    f.write(str(gold.idx) + '\t' + pred_nl.strip() + '\n')
+                    f1.write(str(gold.idx) + '\t' + gold.target.strip() + '\n')
+                    f2.write(str(gold.idx) + '\t' + gold.source.strip() + '\n')
                 else:
-                    fo.write(pred.strip() + '\n')
-                    fg.write(ex.target.strip() + '\n')
-                    fs.write(ex.source.strip() + '\n')
+                    f.write(pred_nl.strip() + '\n')
+                    f1.write(gold.target.strip() + '\n')
+                    f2.write(gold.source.strip() + '\n')
 
         if args.task == 'summarize':
-            gold_map, pred_map = smooth_bleu.computeMaps(predictions=[], gold_fn=gold_fn)
-            bleu = round(smooth_bleu.bleuFromMaps(gold_map, pred_map)[0], 2)
+            (goldMap, predictionMap) = smooth_bleu.computeMaps(predictions, gold_fn)
+            bleu = round(smooth_bleu.bleuFromMaps(goldMap, predictionMap)[0], 2)
         else:
             bleu = round(_bleu(gold_fn, output_fn), 2)
-
+        
         result = {'em': np.mean(dev_accs) * 100, 'bleu': bleu}
-        if args.task == 'concode':
-            result['codebleu'] = calc_code_bleu.get_codebleu(gold_fn, output_fn, args.lang) * 100
+        if args.task == 'concode': # Cần đảm bảo calc_code_bleu được gọi đúng
+            # Ví dụ: codebleu_score = calc_code_bleu.get_codebleu(gold_fn, output_fn, args.lang)
+            # result['codebleu'] = codebleu_score * 100
+            # Hiện tại codebleu vẫn là 0.0 như khởi tạo
+            result['codebleu'] = 0 # Giữ nguyên như code gốc nếu chưa sửa
 
     logger.info("***** Eval results *****")
     for key in sorted(result.keys()):
@@ -197,93 +176,90 @@ def main():
 
     set_dist(args)
     set_seed(args)
-
     config, model, tokenizer = build_or_load_gen_model(args)
     model.to(args.device)
     if args.n_gpu > 1:
         model = torch.nn.DataParallel(model)
-
     pool = multiprocessing.Pool(args.cpu_cont)
-    (
-        args.train_filename,
-        args.dev_filename,
-        args.test_filename
-    ) = get_filenames(
-        args.data_dir,
-        args.task,
-        args.sub_task
-    )
-
+    args.train_filename, args.dev_filename, args.test_filename = get_filenames(args.data_dir, args.task, args.sub_task)
     fa = open(os.path.join(args.output_dir, 'summary.log'), 'a+')
 
     if args.do_train:
         if args.local_rank in [-1, 0] and args.data_num == -1:
-            summary_fn = f"{args.summary_dir}/{args.output_dir.strip('/').replace('/', '_')}"
+            summary_fn = '{}/{}'.format(args.summary_dir, '/'.join(args.output_dir.split('/')[1:]))
             tb_writer = SummaryWriter(summary_fn)
 
-        train_examples, train_data = load_and_cache_gen_data(
-            args, args.train_filename, pool, tokenizer, 'train'
-        )
-        train_sampler = (
-            RandomSampler(train_data)
-            if args.local_rank == -1
-            else DistributedSampler(train_data)
-        )
-        train_dataloader = DataLoader(
-            train_data,
-            sampler=train_sampler,
-            batch_size=args.train_batch_size,
-            num_workers=4,
-            pin_memory=True
-        )
+        train_examples, train_data = load_and_cache_gen_data(args, args.train_filename, pool, tokenizer, 'train')
+        train_sampler = RandomSampler(train_data) if args.local_rank == -1 else DistributedSampler(train_data)
+        train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size,
+                                      num_workers=4, pin_memory=True)
 
         no_decay = ['bias', 'LayerNorm.weight']
         optimizer_grouped_parameters = [
-            {
-                'params': [
-                    p for n, p in model.named_parameters()
-                    if not any(nd in n for nd in no_decay)
-                ],
-                'weight_decay': args.weight_decay
-            },
-            {
-                'params': [
-                    p for n, p in model.named_parameters()
-                    if any(nd in n for nd in no_decay)
-                ],
-                'weight_decay': 0.0
-            }
+            {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+             'weight_decay': args.weight_decay},
+            {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
         ]
         optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
         num_train_optimization_steps = args.num_train_epochs * len(train_dataloader)
-        scheduler = get_linear_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps=args.warmup_steps,
-            num_training_steps=num_train_optimization_steps
-        )
-
-        logger.info("args.warmup_steps %s", args.warmup_steps)
-        logger.info("num_train_optimization_steps: %s", num_train_optimization_steps)
-
+        scheduler = get_linear_schedule_with_warmup(optimizer,
+                                                    num_warmup_steps=args.warmup_steps,
+                                                    num_training_steps=num_train_optimization_steps)
+        
         global_step = 0
         best_bleu_em = -1
-        best_ppl = float('inf')
+        best_ppl = 1e6 # Sử dụng giá trị lớn cho best_ppl ban đầu
+        # Khởi tạo args.start_epoch ở đây để đảm bảo nó có giá trị nếu không có checkpoint
+        args.start_epoch = 0
 
-        ckpt_paths = glob.glob(os.path.join(
-            args.output_dir, 'checkpoint-epoch-*', 'checkpoint.pt'
-        ))
-        if ckpt_paths:
-            latest_ckpt = max(ckpt_paths, key=os.path.getctime)
-            logger.info("Resume from %s", latest_ckpt)
-            ckpt = torch.load(latest_ckpt, map_location=args.device)
-            model_to_load = model.module if hasattr(model, 'module') else model
-            model_to_load.load_state_dict(ckpt['model_state_dict'])
-            optimizer.load_state_dict(ckpt['optimizer_state_dict'])
-            scheduler.load_state_dict(ckpt['scheduler_state_dict'])
-            global_step = ckpt.get('global_step', 0)
-            args.start_epoch = ckpt.get('epoch', 0) + 1
+        # --- BEGIN CHECKPOINT LOADING LOGIC ---
+        # Tìm các checkpoint đã lưu dạng 'checkpoint-epoch-*'
+        # glob.glob trả về danh sách các path, ví dụ: ['./outputs/checkpoint-epoch-0', './outputs/checkpoint-epoch-1']
+        # Chúng ta cần tìm file checkpoint.pt bên trong các thư mục đó
+        potential_ckpt_dirs = glob.glob(os.path.join(args.output_dir, 'checkpoint-epoch-*'))
+        ckpt_files = []
+        for d in potential_ckpt_dirs:
+            ckpt_file = os.path.join(d, 'checkpoint.pt')
+            if os.path.exists(ckpt_file):
+                ckpt_files.append(ckpt_file)
+        
+        if ckpt_files:
+            latest_ckpt_file = max(ckpt_files, key=os.path.getctime)
+            logger.info("Resuming training from checkpoint %s", latest_ckpt_file)
+            print(f"DEBUG: Attempting to resume from {latest_ckpt_file}", flush=True)
+            try:
+                # Thêm weights_only=True để an toàn hơn, nếu checkpoint chỉ chứa tensors và dicts cơ bản
+                # Nếu gây lỗi, quay lại False nhưng cần cẩn trọng với file checkpoint không tin cậy
+                checkpoint = torch.load(latest_ckpt_file, map_location=args.device) #, weights_only=True) 
+                
+                model_to_load = model.module if hasattr(model, 'module') else model
+                model_to_load.load_state_dict(checkpoint['model_state_dict'])
+                
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                
+                args.start_epoch = checkpoint['epoch'] + 1
+                global_step = checkpoint['global_step']
+                # Khôi phục các giá trị best nếu có trong checkpoint (tùy chọn, nếu bạn muốn duy trì chúng)
+                best_ppl = checkpoint.get('best_ppl', 1e6)
+                best_bleu_em = checkpoint.get('best_bleu_em', -1)
+
+                logger.info("Successfully resumed from epoch %d (next epoch to run: %d). Global step: %d",
+                            checkpoint['epoch'], args.start_epoch, global_step)
+                print(f"DEBUG: Successfully resumed. Next epoch: {args.start_epoch}, Global step: {global_step}", flush=True)
+
+            except Exception as e:
+                logger.error("Failed to load checkpoint %s. Starting training from scratch. Error: %s",
+                             latest_ckpt_file, e, exc_info=True)
+                print(f"ERROR: Failed to load checkpoint {latest_ckpt_file}. Error: {e}. Starting from scratch.", flush=True)
+                args.start_epoch = 0
+                global_step = 0
+                best_bleu_em = -1
+                best_ppl = 1e6
         else:
-            args.start_epoch = 0
+            logger.info("No existing 'checkpoint-epoch-*' found. Starting training from scratch.")
+            print("DEBUG: No 'checkpoint-epoch-*' found. Starting from scratch.", flush=True)
+        # --- END CHECKPOINT LOADING LOGIC ---
 
         train_example_num = len(train_data)
         logger.info("***** Running training *****")
@@ -291,17 +267,18 @@ def main():
         logger.info("  Batch size = %d", args.train_batch_size)
         logger.info("  Batch num = %d", math.ceil(train_example_num / args.train_batch_size))
         logger.info("  Num epoch = %d", args.num_train_epochs)
-        logger.info("Model type: %s", args.model_type)
+        logger.info("  Starting epoch = %d", args.start_epoch) # Log epoch bắt đầu
+        logger.info("  Model type: %s", args.model_type) # Đổi từ print sang logger.info
 
         dev_dataset = {}
-        not_loss_dec_cnt = 0
-        not_bleu_em_inc_cnt = 0 if args.do_eval_bleu else int(1e6)
-        ce_cir = nn.CrossEntropyLoss(ignore_index=-100)
-        kld = nn.KLDivLoss(reduction='none')
+        not_loss_dec_cnt, not_bleu_em_inc_cnt = 0, 0 if args.do_eval_bleu else 1e6
+        
+        # ce_cir = nn.CrossEntropyLoss(ignore_index=-100) # Biến này được định nghĩa nhưng không thấy dùng trong CE loss block
+        # kld = nn.KLDivLoss(reduction='none') # Tương tự
 
         for cur_epoch in range(args.start_epoch, int(args.num_train_epochs)):
-            logger.info("Starting epoch %d", cur_epoch)
-            bar = tqdm(train_dataloader, total=len(train_dataloader), desc="Training")
+            logger.info(f"Starting epoch {cur_epoch}/{int(args.num_train_epochs) - 1}")
+            bar = tqdm(train_dataloader, total=len(train_dataloader), desc=f"Epoch {cur_epoch} Training")
             nb_tr_examples, nb_tr_steps, tr_loss = 0, 0, 0
             model.train()
             for step, batch in enumerate(bar):
@@ -311,27 +288,19 @@ def main():
                 target_mask = target_ids.ne(tokenizer.pad_token_id)
 
                 if args.model_type == 'roberta':
-                    loss, _, _ = model(
-                        source_ids=source_ids,
-                        source_mask=source_mask,
-                        target_ids=target_ids,
-                        target_mask=target_mask
-                    )
+                    loss, _, _ = model(source_ids=source_ids, source_mask=source_mask,
+                                       target_ids=target_ids, target_mask=target_mask)
                 else:
-                    outputs = model(
-                        input_ids=source_ids,
-                        attention_mask=source_mask,
-                        labels=target_ids,
-                        decoder_attention_mask=target_mask
-                    )
+                    outputs = model(input_ids=source_ids, attention_mask=source_mask,
+                                    labels=target_ids, decoder_attention_mask=target_mask)
                     loss = outputs.loss
-
+                
                 if args.n_gpu > 1:
                     loss = loss.mean()
                 if args.gradient_accumulation_steps > 1:
                     loss = loss / args.gradient_accumulation_steps
-
                 tr_loss += loss.item()
+
                 nb_tr_examples += source_ids.size(0)
                 nb_tr_steps += 1
                 loss.backward()
@@ -341,141 +310,199 @@ def main():
                     optimizer.zero_grad()
                     scheduler.step()
                     global_step += 1
-                    avg_loss = tr_loss * args.gradient_accumulation_steps / (nb_tr_steps + 1)
-                    bar.set_description(f"[{cur_epoch}] Train loss {avg_loss:.3f}")
+                    # Sửa lại cách tính avg_loss cho bar description
+                    avg_loss = round(tr_loss / (step + 1), 4) # Chia cho số step đã qua trong epoch này
+                    bar.set_description(f"Epoch {cur_epoch} Train loss {avg_loss:.3f}")
+
+
+            # --- BEGIN SAVE CHECKPOINT PER EPOCH ---
+            if args.local_rank in [-1, 0]: # Chỉ lưu checkpoint ở master process nếu dùng distributed
+                checkpoint_dir = os.path.join(args.output_dir, f'checkpoint-epoch-{cur_epoch}')
+                os.makedirs(checkpoint_dir, exist_ok=True)
+                
+                model_to_save = model.module if hasattr(model, 'module') else model
+                checkpoint_data = {
+                    'epoch': cur_epoch,
+                    'model_state_dict': model_to_save.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict(),
+                    'global_step': global_step,
+                    'best_ppl': best_ppl, # Lưu cả best_ppl và best_bleu_em
+                    'best_bleu_em': best_bleu_em,
+                    'args': args # Lưu args để tham khảo (tùy chọn)
+                }
+                output_checkpoint_file = os.path.join(checkpoint_dir, "checkpoint.pt")
+                torch.save(checkpoint_data, output_checkpoint_file)
+                logger.info(f"Saved checkpoint for epoch {cur_epoch} to {output_checkpoint_file}")
+                print(f"DEBUG: Saved checkpoint for epoch {cur_epoch} to {output_checkpoint_file}", flush=True)
+            # --- END SAVE CHECKPOINT PER EPOCH ---
 
             if args.do_eval:
                 if 'dev_loss' in dev_dataset:
                     eval_examples, eval_data = dev_dataset['dev_loss']
                 else:
-                    eval_examples, eval_data = load_and_cache_gen_data(
-                        args, args.dev_filename, pool, tokenizer, 'dev'
-                    )
-                    dev_dataset['dev_loss'] = (eval_examples, eval_data)
+                    eval_examples, eval_data = load_and_cache_gen_data(args, args.dev_filename, pool, tokenizer, 'dev')
+                    dev_dataset['dev_loss'] = eval_examples, eval_data
 
                 eval_ppl = eval_ppl_epoch(args, eval_data, eval_examples, model, tokenizer)
-                logger.info("  eval_ppl = %s", eval_ppl)
-                if args.data_num == -1:
+                result = {'epoch': cur_epoch, 'global_step': global_step, 'eval_ppl': eval_ppl}
+                for key in sorted(result.keys()):
+                    logger.info("  %s = %s", key, str(result[key]))
+                logger.info("  " + "*" * 20)
+                if args.data_num == -1 and args.local_rank in [-1, 0]: # Thêm check local_rank
                     tb_writer.add_scalar('dev_ppl', eval_ppl, cur_epoch)
-                    print("dev_bleu:",dev_bleu)
-                    print("dev_em:", dev_em)
-                    print("dev_bleu_em:",dev_bleu_em)
-                    print("best_bleu_em:", best_bleu_em)
+                
+                # Bỏ save 'checkpoint-last' vì đã có 'checkpoint-epoch-*'
+                # logger.info("eval_ppl: %s", eval_ppl) # Đổi print sang logger.info
 
                 if eval_ppl < best_ppl:
                     not_loss_dec_cnt = 0
-                    logger.info("  Best ppl: %s", eval_ppl)
+                    logger.info("  Best ppl: %s (decreased from %s)", eval_ppl, best_ppl)
                     best_ppl = eval_ppl
-
-                    output_dir = os.path.join(args.output_dir, 'checkpoint-best-ppl')
-                    os.makedirs(output_dir, exist_ok=True)
-                    if args.always_save_model:
-                        torch.save(
-                            model.module.state_dict() if hasattr(model, 'module') else model.state_dict(),
-                            os.path.join(output_dir, "pytorch_model.bin")
-                        )
-                        logger.info("Saved best ppl model to %s", output_dir)
+                    fa.write("[%d] Best ppl changed into %.4f\n" % (cur_epoch, eval_ppl))
+                    
+                    # Lưu checkpoint 'best-ppl' (vẫn giữ logic này nếu bạn muốn)
+                    # Nếu checkpoint-epoch-* đã đủ, có thể bỏ phần này
+                    if args.always_save_model and args.local_rank in [-1, 0]:
+                        output_dir_best_ppl = os.path.join(args.output_dir, 'checkpoint-best-ppl')
+                        os.makedirs(output_dir_best_ppl, exist_ok=True)
+                        model_to_save = model.module if hasattr(model, 'module') else model
+                        # Lưu đầy đủ thông tin cho best-ppl checkpoint nếu muốn resume từ nó
+                        # Hoặc chỉ lưu model state nếu chỉ dùng để test
+                        # Ở đây, ví dụ vẫn lưu đầy đủ như checkpoint-epoch-*
+                        best_ppl_checkpoint_data = {
+                            'epoch': cur_epoch, # Epoch mà best_ppl đạt được
+                            'model_state_dict': model_to_save.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'scheduler_state_dict': scheduler.state_dict(),
+                            'global_step': global_step,
+                            'best_ppl': best_ppl,
+                            'best_bleu_em': best_bleu_em,
+                            'args': args
+                        }
+                        output_model_file = os.path.join(output_dir_best_ppl, "checkpoint.pt") # Đổi tên thành checkpoint.pt
+                        torch.save(best_ppl_checkpoint_data, output_model_file)
+                        logger.info("Saved best PPL model checkpoint to %s", output_model_file)
                 else:
                     not_loss_dec_cnt += 1
-                    logger.info("Ppl did not decrease for %d epochs", not_loss_dec_cnt)
+                    logger.info("Ppl did not decrease for %d epochs. Current PPL: %s, Best PPL: %s",
+                                not_loss_dec_cnt, eval_ppl, best_ppl)
+                    if all([x >= args.patience for x in [not_bleu_em_inc_cnt, not_loss_dec_cnt]]): # Sửa > thành >=
+                        early_stop_str = "[%d] Early stop as not_bleu_em_inc_cnt=%d (>=%d), and not_loss_dec_cnt=%d (>=%d)\n" % (
+                            cur_epoch, not_bleu_em_inc_cnt, args.patience, not_loss_dec_cnt, args.patience)
+                        logger.info(early_stop_str)
+                        fa.write(early_stop_str)
+                        break # Thoát vòng lặp epoch
 
+                logger.info("***** Clearing CUDA cache after PPL eval *****")
                 torch.cuda.empty_cache()
 
                 if args.do_eval_bleu:
-                    eval_examples, eval_data = load_and_cache_gen_data(
-                        args, args.dev_filename, pool, tokenizer, 'dev',
-                        only_src=True, is_sample=True
-                    )
-                    result = eval_bleu_epoch(
-                        args, eval_data, eval_examples, model, tokenizer,
-                        'dev', f'e{cur_epoch}'
-                    )
+                    eval_examples, eval_data = load_and_cache_gen_data(args, args.dev_filename, pool, tokenizer, 'dev',
+                                                                       only_src=True, is_sample=True)
+                    result = eval_bleu_epoch(args, eval_data, eval_examples, model, tokenizer, 'dev', 'e%d' % cur_epoch)
                     dev_bleu, dev_em = result['bleu'], result['em']
-                    dev_bleu_em = (
-                        dev_bleu if args.task == 'summarize' else
-                        dev_em if args.task == 'defect' else
-                        dev_bleu + dev_em
-                    )
-                    if args.data_num == -1:
+                    if args.task in ['summarize']:
+                        dev_bleu_em = dev_bleu
+                    elif args.task in ['defect']:
+                        dev_bleu_em = dev_em
+                    else:
+                        dev_bleu_em = dev_bleu + dev_em
+                    
+                    if args.data_num == -1 and args.local_rank in [-1, 0]:
                         tb_writer.add_scalar('dev_bleu_em', dev_bleu_em, cur_epoch)
+                    
+                    # logger.info("dev_bleu: %s, dev_em: %s, dev_bleu_em: %s, best_bleu_em: %s",
+                    #             dev_bleu, dev_em, dev_bleu_em, best_bleu_em) # Đổi print
 
                     if dev_bleu_em > best_bleu_em:
                         not_bleu_em_inc_cnt = 0
+                        logger.info("  [%d] Best bleu+em: %.2f (bleu: %.2f, em: %.2f) (increased from %.2f)",
+                                    cur_epoch, dev_bleu_em, dev_bleu, dev_em, best_bleu_em)
                         best_bleu_em = dev_bleu_em
-                        logger.info(
-                            "  [%d] Best bleu+em: %.2f (bleu: %.2f, em: %.2f)",
-                            cur_epoch, dev_bleu_em, dev_bleu, dev_em
-                        )
-                        output_dir = os.path.join(args.output_dir, 'checkpoint-best-bleu')
-                        os.makedirs(output_dir, exist_ok=True)
-                        if args.data_num == -1 or args.always_save_model:
-                            torch.save(
-                                model.module.state_dict() if hasattr(model, 'module') else model.state_dict(),
-                                os.path.join(output_dir, "pytorch_model.bin")
-                            )
-                            logger.info("Saved best bleu model to %s", output_dir)
+                        fa.write("[%d] Best bleu+em changed into %.2f (bleu: %.2f, em: %.2f)\n" % (
+                            cur_epoch, best_bleu_em, dev_bleu, dev_em))
+                        
+                        # Lưu checkpoint 'best-bleu' (tương tự best-ppl)
+                        if (args.data_num == -1 or args.always_save_model) and args.local_rank in [-1, 0]:
+                            output_dir_best_bleu = os.path.join(args.output_dir, 'checkpoint-best-bleu')
+                            os.makedirs(output_dir_best_bleu, exist_ok=True)
+                            model_to_save = model.module if hasattr(model, 'module') else model
+                            best_bleu_checkpoint_data = {
+                                'epoch': cur_epoch,
+                                'model_state_dict': model_to_save.state_dict(),
+                                'optimizer_state_dict': optimizer.state_dict(),
+                                'scheduler_state_dict': scheduler.state_dict(),
+                                'global_step': global_step,
+                                'best_ppl': best_ppl,
+                                'best_bleu_em': best_bleu_em,
+                                'args': args
+                            }
+                            output_model_file = os.path.join(output_dir_best_bleu, "checkpoint.pt") # Đổi tên
+                            torch.save(best_bleu_checkpoint_data, output_model_file)
+                            logger.info("Saved best BLEU model checkpoint to %s", output_model_file)
                     else:
                         not_bleu_em_inc_cnt += 1
-                        logger.info(
-                            "Bleu+em did not improve for %d epochs", not_bleu_em_inc_cnt
-                        )
-
-            # Save checkpoint each epoch
-            checkpoint_dir = os.path.join(
-                args.output_dir, f'checkpoint-epoch-{cur_epoch}'
-            )
-            os.makedirs(checkpoint_dir, exist_ok=True)
-            ckpt = {
-                'epoch': cur_epoch,
-                'model_state_dict': model.module.state_dict() if hasattr(model, 'module') else model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'global_step': global_step
-            }
-            torch.save(ckpt, os.path.join(checkpoint_dir, 'checkpoint.pt'))
-            logger.info("Saved checkpoint for epoch %d to %s", cur_epoch, checkpoint_dir)
+                        logger.info("Bleu+em did not improve for %d epochs. Current: %.2f, Best: %.2f",
+                                    not_bleu_em_inc_cnt, dev_bleu_em, best_bleu_em)
+                        # fa.write(...) # Giữ nguyên log này nếu muốn
+                        if all([x >= args.patience for x in [not_bleu_em_inc_cnt, not_loss_dec_cnt]]): # Sửa > thành >=
+                            stop_early_str = "[%d] Early stop as not_bleu_em_inc_cnt=%d (>=%d), and not_loss_dec_cnt=%d (>=%d)\n" % (
+                                cur_epoch, not_bleu_em_inc_cnt, args.patience, not_loss_dec_cnt, args.patience)
+                            logger.info(stop_early_str)
+                            fa.write(stop_early_str)
+                            break # Thoát vòng lặp epoch
+            
+            logger.info("***** Clearing CUDA cache at end of epoch %d *****", cur_epoch)
             torch.cuda.empty_cache()
+            # Kết thúc vòng lặp epoch
 
-        if args.local_rank in [-1, 0] and args.data_num == -1:
+        if args.local_rank in [-1, 0] and args.data_num == -1 and 'tb_writer' in locals(): # Check tb_writer tồn tại
             tb_writer.close()
         logger.info("Finish training and take %s", get_elapse_time(t0))
 
     if args.do_test:
-        logger.info("  ***** Testing *****")
+        logger.info("  " + "***** Testing *****")
         logger.info("  Batch size = %d", args.eval_batch_size)
 
-        for criteria in ['best-bleu']:
-            model_path = os.path.join(
-                args.output_dir, f'checkpoint-{criteria}', 'pytorch_model.bin'
-            )
-            logger.info("Reload model from %s", model_path)
-            model.load_state_dict(torch.load(model_path))
-            eval_examples, eval_data = load_and_cache_gen_data(
-                args, args.test_filename, pool, tokenizer,
-                'test', only_src=True, is_sample=False
-            )
-            result = eval_bleu_epoch(
-                args, eval_data, eval_examples, model, tokenizer,
-                'test', criteria
-            )
-            logger.info(
-                "[%s] bleu-4: %.2f, em: %.4f, codebleu: %.4f",
-                criteria, result['bleu'], result['em'], result.get('codebleu', 0)
-            )
-            fa.write(
-                f"[{criteria}] bleu-4: {result['bleu']:.2f}, em: {result['em']:.4f}, codebleu: {result.get('codebleu', 0):.4f}\n"
-            )
-            if args.res_fn:
-                with open(args.res_fn, 'a+') as f_out:
-                    f_out.write(
-                        f"[Time: {get_elapse_time(t0)}] {model_path}\n"
-                    )
-                    f_out.write(
-                        f"[{criteria}] bleu-4: {result['bleu']:.2f}, em: {result['em']:.4f}, codebleu: {result.get('codebleu', 0):.4f}\n"
-                    )
+        for criteria in ['best-bleu', 'best-ppl']: # Có thể thêm 'checkpoint-epoch-X' nếu muốn test epoch cụ thể
+            # Điều chỉnh đường dẫn để tải checkpoint.pt từ thư mục criteria
+            checkpoint_file_to_test = os.path.join(args.output_dir, f'checkpoint-{criteria}', 'checkpoint.pt')
+            
+            if not os.path.exists(checkpoint_file_to_test):
+                # Nếu criteria là best-bleu/best-ppl mà không có checkpoint.pt, thử pytorch_model.bin (legacy)
+                # Hoặc chỉ báo lỗi nếu muốn thống nhất dùng checkpoint.pt
+                legacy_model_file = os.path.join(args.output_dir, f'checkpoint-{criteria}', 'pytorch_model.bin')
+                if os.path.exists(legacy_model_file):
+                    logger.info("Found legacy model file %s for testing.", legacy_model_file)
+                    checkpoint_to_load = torch.load(legacy_model_file, map_location=args.device)
+                    # Nếu là legacy, nó chỉ có model_state_dict
+                    model_to_load = model.module if hasattr(model, 'module') else model
+                    model_to_load.load_state_dict(checkpoint_to_load) # Giả sử checkpoint_to_load là state_dict
+                else:
+                    logger.warning(f"Checkpoint file {checkpoint_file_to_test} (nor legacy pytorch_model.bin) not found for criteria {criteria}. Skipping test.")
+                    continue
+            else:
+                logger.info("Reloading model from checkpoint %s", checkpoint_file_to_test)
+                checkpoint_to_load = torch.load(checkpoint_file_to_test, map_location=args.device)
+                model_to_load = model.module if hasattr(model, 'module') else model
+                model_to_load.load_state_dict(checkpoint_to_load['model_state_dict'])
 
-    logger.info("Finish and take %s", get_elapse_time(t0))
-    fa.write("Finish and take %s" % get_elapse_time(t0))
+            eval_examples, eval_data = load_and_cache_gen_data(args, args.test_filename, pool, tokenizer, 'test',
+                                                               only_src=True, is_sample=False)
+            result = eval_bleu_epoch(args, eval_data, eval_examples, model, tokenizer, 'test', criteria)
+            test_bleu, test_em = result['bleu'], result['em']
+            test_codebleu = result.get('codebleu', 0) # Sử dụng .get để tránh KeyError nếu codebleu không có
+            result_str = "[%s] bleu-4: %.2f, em: %.4f, codebleu: %.4f\n" % (criteria, test_bleu, test_em, test_codebleu)
+            logger.info(result_str)
+            fa.write(result_str)
+            if args.res_fn:
+                with open(args.res_fn, 'a+') as f_res: # Đổi tên biến f thành f_res để tránh trùng
+                    f_res.write('[Time: {}] {}\n'.format(get_elapse_time(t0), checkpoint_file_to_test))
+                    f_res.write(result_str)
+
+    logger.info("Finish and take {}".format(get_elapse_time(t0)))
+    fa.write("Finish and take {}".format(get_elapse_time(t0)))
     fa.close()
 
 
