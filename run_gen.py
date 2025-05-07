@@ -264,8 +264,7 @@ def main():
 
         logger.info("args.warmup_steps %s", args.warmup_steps)
         logger.info("num_train_optimization_steps: %s", num_train_optimization_steps)
-        print("args.warmup_steps",args.warmup_steps) # <-- Lệnh print từ file 1
-        print("num_train_optimization_steps:", num_train_optimization_steps) # <-- Lệnh print từ file 1
+
         global_step = 0
         best_bleu_em = -1
         best_ppl = float('inf')
@@ -277,13 +276,12 @@ def main():
             latest_ckpt = max(ckpt_paths, key=os.path.getctime)
             logger.info("Resume from %s", latest_ckpt)
             ckpt = torch.load(latest_ckpt, map_location=args.device)
-            print("Loaded checkpoint from epoch:", ckpt.get('epoch'))
             model_to_load = model.module if hasattr(model, 'module') else model
             model_to_load.load_state_dict(ckpt['model_state_dict'])
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
             scheduler.load_state_dict(ckpt['scheduler_state_dict'])
             global_step = ckpt.get('global_step', 0)
-            args.start_epoch = 5 + 1
+            args.start_epoch = ckpt.get('epoch', 0) + 1
         else:
             args.start_epoch = 0
 
@@ -294,7 +292,7 @@ def main():
         logger.info("  Batch num = %d", math.ceil(train_example_num / args.train_batch_size))
         logger.info("  Num epoch = %d", args.num_train_epochs)
         logger.info("Model type: %s", args.model_type)
-        print( args.model_type) # <-- Lệnh print từ file 1
+
         dev_dataset = {}
         not_loss_dec_cnt = 0
         not_bleu_em_inc_cnt = 0 if args.do_eval_bleu else int(1e6)
@@ -359,7 +357,10 @@ def main():
                 logger.info("  eval_ppl = %s", eval_ppl)
                 if args.data_num == -1:
                     tb_writer.add_scalar('dev_ppl', eval_ppl, cur_epoch)
-                print("eval_ppl:",eval_ppl) # <-- Lệnh print từ file 1
+                    print("dev_bleu:",dev_bleu)
+                    print("dev_em:", dev_em)
+                    print("dev_bleu_em:",dev_bleu_em)
+                    print("best_bleu_em:", best_bleu_em)
 
                 if eval_ppl < best_ppl:
                     not_loss_dec_cnt = 0
@@ -397,10 +398,6 @@ def main():
                     )
                     if args.data_num == -1:
                         tb_writer.add_scalar('dev_bleu_em', dev_bleu_em, cur_epoch)
-                    print("dev_bleu:",dev_bleu)
-                    print("dev_em:", dev_em)
-                    print("dev_bleu_em:",dev_bleu_em)
-                    print("best_bleu_em:", best_bleu_em)
 
                     if dev_bleu_em > best_bleu_em:
                         not_bleu_em_inc_cnt = 0
