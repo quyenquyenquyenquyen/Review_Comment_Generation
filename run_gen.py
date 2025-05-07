@@ -277,6 +277,7 @@ def main():
             latest_ckpt = max(ckpt_paths, key=os.path.getctime)
             logger.info("Resume from %s", latest_ckpt)
             ckpt = torch.load(latest_ckpt, map_location=args.device)
+            print("Loaded checkpoint from epoch:", ckpt.get('epoch'))
             model_to_load = model.module if hasattr(model, 'module') else model
             model_to_load.load_state_dict(ckpt['model_state_dict'])
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
