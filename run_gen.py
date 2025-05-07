@@ -283,7 +283,7 @@ def main():
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
             scheduler.load_state_dict(ckpt['scheduler_state_dict'])
             global_step = ckpt.get('global_step', 0)
-            args.start_epoch = ckpt.get('epoch', 0) + 1
+            args.start_epoch = 5 + 1
         else:
             args.start_epoch = 0
 
