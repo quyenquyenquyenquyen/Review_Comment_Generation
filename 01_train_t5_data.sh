@@ -32,5 +32,5 @@ CUDA_VISIBLE_DEVICES=0 python run_gen.py \
     --save_last_checkpoints --always_save_model \
     --res_dir ./model/code2review_t5_data_task2/outputs/results \
     --res_fn ./model/code2review_t5_data_task2/outputs/results/summarize_codet5_base.txt \
-    --train_batch_size 4 --eval_batch_size 4 \
+    --train_batch_size 8 --eval_batch_size 8 \
     --max_source_length 512 --max_target_length 100
