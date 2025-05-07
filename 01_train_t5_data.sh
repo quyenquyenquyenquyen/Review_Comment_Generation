@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Đường dẫn nguyên gốc checkpoint trên Kaggle
-CKPT_SRC=/kaggle/input/checkpoint-5/checkpoint-epoch-5
+CKPT_SRC=/kaggle/input/d/cherese/checkpoint-5/checkpoint-epoch-5
 
 # Thư mục output của bạn (writable)
 OUT=./model/code2review_t5_data_task2/outputs
