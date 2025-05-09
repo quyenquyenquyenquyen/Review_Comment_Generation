@@ -376,22 +376,32 @@ def main():
         logger.info("  " + "***** Testing *****")
         logger.info("  Batch size = %d", args.eval_batch_size)
 
-        for criteria in ['best-bleu']:
-            file = os.path.join(args.output_dir, 'checkpoint-{}/pytorch_model.bin'.format(criteria))
-            logger.info("Reload model from {}".format(file))
-            model.load_state_dict(torch.load(file))
+        # Đường dẫn cố định bạn muốn sử dụng
+        fixed_checkpoint_path = "/kaggle/input/checkpoint-best-bleu/pytorch_model.bin"
+        
+        # Bạn vẫn cần một 'criteria' để đặt tên cho các file output (ví dụ: test_criteria.output)
+        # Bạn có thể đặt tên tùy ý, ví dụ:
+        output_criteria_name = "custom_kaggle_checkpoint" 
+
+        if os.path.exists(fixed_checkpoint_path):
+            logger.info("Reload model from {}".format(fixed_checkpoint_path))
+            model.load_state_dict(torch.load(fixed_checkpoint_path))
+            
             eval_examples, eval_data = load_and_cache_gen_data(args, args.test_filename, pool, tokenizer, 'test',
                                                                only_src=True, is_sample=False)
-            result = eval_bleu_epoch(args, eval_data, eval_examples, model, tokenizer, 'test', criteria)
+            result = eval_bleu_epoch(args, eval_data, eval_examples, model, tokenizer, 'test', output_criteria_name)
             test_bleu, test_em = result['bleu'], result['em']
             test_codebleu = result['codebleu'] if 'codebleu' in result else 0
-            result_str = "[%s] bleu-4: %.2f, em: %.4f, codebleu: %.4f\n" % (criteria, test_bleu, test_em, test_codebleu)
+            result_str = "[%s] bleu-4: %.2f, em: %.4f, codebleu: %.4f\n" % (output_criteria_name, test_bleu, test_em, test_codebleu)
             logger.info(result_str)
             fa.write(result_str)
             if args.res_fn:
                 with open(args.res_fn, 'a+') as f:
-                    f.write('[Time: {}] {}\n'.format(get_elapse_time(t0), file))
+                    f.write('[Time: {}] Loaded from: {}\n'.format(get_elapse_time(t0), fixed_checkpoint_path)) # Ghi rõ nguồn tải
                     f.write(result_str)
+        else:
+            logger.error(f"Checkpoint file not found: {fixed_checkpoint_path}")
+            # Có thể thêm xử lý thoát chương trình ở đây nếu muốn
     logger.info("Finish and take {}".format(get_elapse_time(t0)))
     fa.write("Finish and take {}".format(get_elapse_time(t0)))
     fa.close()
