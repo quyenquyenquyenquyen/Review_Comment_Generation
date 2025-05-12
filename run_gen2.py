@@ -385,7 +385,11 @@ def main():
 
         if os.path.exists(fixed_checkpoint_path):
             logger.info("Reload model from {}".format(fixed_checkpoint_path))
-            model.load_state_dict(torch.load(fixed_checkpoint_path))
+            # Load the entire checkpoint dictionary
+            checkpoint = torch.load(fixed_checkpoint_path, map_location=args.device) # Thêm map_location để đảm bảo load đúng device
+            
+            # Access the model's state_dict from the checkpoint dictionary
+            model.load_state_dict(checkpoint['model_state_dict'])
             
             eval_examples, eval_data = load_and_cache_gen_data(args, args.test_filename, pool, tokenizer, 'test',
                                                                only_src=True, is_sample=False)
