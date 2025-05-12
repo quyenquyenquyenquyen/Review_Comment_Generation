@@ -377,7 +377,7 @@ def main():
         logger.info("  Batch size = %d", args.eval_batch_size)
 
         # Đường dẫn cố định bạn muốn sử dụng
-        fixed_checkpoint_path = "/kaggle/input/checkpoint-best-bleu/pytorch_model.bin"
+        fixed_checkpoint_path = "/kaggle/input/checkpoint-best-bleu/checkpoint.pt"
         
         # Bạn vẫn cần một 'criteria' để đặt tên cho các file output (ví dụ: test_criteria.output)
         # Bạn có thể đặt tên tùy ý, ví dụ:
